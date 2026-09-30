@@ -955,6 +955,30 @@ button:disabled{
     grid-template-columns:1fr 1fr;
   }
 }
+/* BLACKLIST CARD */
+.bl-card{margin-top:16px;border:1px solid #e4daf3;border-radius:11px;background:linear-gradient(135deg,rgba(139,92,246,.05),rgba(236,72,153,.03)),#fdfcff;overflow:hidden}
+.bl-card summary{list-style:none;display:flex;align-items:center;gap:10px;padding:12px 15px;cursor:pointer;font-size:13px;font-weight:800;color:#59466d}
+.bl-card summary::-webkit-details-marker{display:none}
+.bl-badge{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:12px;background:#efe8ff;color:#7752c8}
+.bl-badge.on{background:linear-gradient(135deg,#7c4fe8,#a855f7);color:#fff}
+.bl-chev{margin-left:auto;color:#9a8fa6;transition:transform .15s}
+.bl-card[open] .bl-chev{transform:rotate(90deg)}
+.bl-body{padding:0 15px 14px}
+.bl-input{min-height:104px;font:12.5px/1.6 ui-monospace,Menlo,Consolas,monospace;background:linear-gradient(180deg,#fff,#fbf8ff);border:1px dashed #cdbcf0;border-radius:9px}
+.bl-input:focus{border-style:solid}
+.bl-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px}
+.bl-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bl-actions button{padding:6px 11px;font-size:12px}
+.bl-lib{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#665b72;cursor:pointer}
+.bl-lib input{width:auto;accent-color:#8b5cf6}
+
+/* COLLAPSIBLE STATS */
+.stats-title{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin-bottom:10px}
+.stats-summary{font-weight:600;color:#9a8fa6;font-size:11px}
+.stats-chev{margin-left:auto;color:#9a8fa6;transition:transform .15s;transform:rotate(90deg)}
+.search-stats.collapsed .stats-chev{transform:rotate(0)}
+.search-stats.collapsed .stats-body{display:none}
+.search-stats.collapsed .stats-title{margin-bottom:0}
 </style>
 </head>
 
@@ -984,18 +1008,33 @@ button:disabled{
 </label>
 
 <label class="language-option">
-<input type="checkbox" value="fr">
-<span>French</span>
-</label>
-
-<label class="language-option">
 <input type="checkbox" value="es">
 <span>Spanish</span>
 </label>
 
 <label class="language-option">
+<input type="checkbox" value="fr">
+<span>French</span>
+</label>
+
+<label class="language-option">
 <input type="checkbox" value="pt">
 <span>Portuguese</span>
+</label>
+
+<label class="language-option">
+<input type="checkbox" value="zh">
+<span>Chinese</span>
+</label>
+
+<label class="language-option">
+<input type="checkbox" value="ja">
+<span>Japanese</span>
+</label>
+
+<label class="language-option">
+<input type="checkbox" value="ko">
+<span>Korean</span>
 </label>
 
 </div>
@@ -1078,6 +1117,31 @@ View statistics and activity are based on long-form videos.
 
 </div>
 
+<details class="bl-card" id="blCard">
+  <summary>
+    <span>Exclude Known Channels</span>
+    <span class="bl-badge" id="blBadge">Optional</span>
+    <span class="bl-chev">›</span>
+  </summary>
+  <div class="bl-body">
+    <textarea id="blInput" class="bl-input" spellcheck="false"
+      placeholder="One per line — channel name or Channel ID (UC…)&#10;Mixed input is fine&#10;Lines starting with # are ignored"></textarea>
+    <div class="bl-foot">
+      <span class="hint" id="blCount">0 IDs · 0 names</span>
+      <div class="bl-actions">
+        <label class="bl-lib"><input type="checkbox" id="blLib"> Also skip creators in local library</label>
+        <button class="btn-secondary" onclick="$('blFile').click()">Import TXT / CSV</button>
+        <button class="btn-secondary" onclick="$('blInput').value='';onBlChange()">Clear</button>
+        <input type="file" id="blFile" accept=".txt,.csv" hidden>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Excluded before analysis, never counted as new channels, and cost no extra quota.
+      Names are matched exactly (ignoring case/accents) against the channel title returned by search; Channel IDs (or channel URLs containing one) are the most reliable.
+    </div>
+  </div>
+</details>
+
 <div class="est" id="est"></div>
 
 <div class="buttons">
@@ -1100,7 +1164,13 @@ View statistics and activity are based on long-form videos.
 
 <div class="search-stats" id="searchStats">
 
-<div class="stats-title">Search Statistics</div>
+<div class="stats-title" onclick="toggleStats()">
+<span>Search Statistics</span>
+<span class="stats-summary" id="statsSummary"></span>
+<span class="stats-chev">›</span>
+</div>
+
+<div class="stats-body" id="statsBody">
 
 <div class="stats-section-title">Discovery Pipeline</div>
 
@@ -1193,19 +1263,15 @@ View statistics and activity are based on long-form videos.
 
 <thead>
 <tr>
-<th>Language</th>
-<th>Keyword</th>
-<th>API Videos</th>
-<th>Unique Videos</th>
-<th>Channels Found</th>
-<th>Status</th>
+<th>Language</th><th>Keyword</th><th>API Videos</th><th>Pages</th>
+<th>New Channels</th><th>Duplicate / Excluded</th><th>Status</th>
 </tr>
 </thead>
 
 <tbody id="pipelineBody">
 
 <tr>
-<td colspan="6" class="pipeline-empty">
+<td colspan="7" class="pipeline-empty">
 Search pipeline details will appear here.
 </td>
 </tr>
@@ -1215,6 +1281,9 @@ Search pipeline details will appear here.
 </table>
 
 </div>
+
+
+</div><!-- /stats-body -->
 
 </div>
 
@@ -1338,6 +1407,15 @@ const MAX_KEYWORDS_PER_LANGUAGE=5;
  * are used later to rank candidates.
  */
 const CANDIDATE_MULTIPLIER=6;
+
+/* Smart-stop thresholds */
+const MAX_PAGES=6;          // hard cap per keyword
+const LOW_YIELD_NEW=3;      // a page with fewer new channels than this is "low-yield"
+const LOW_YIELD_PAGES=2;    // stop keyword after N consecutive low-yield pages
+const DUP_RATE_HIGH=0.7;    // (duplicate+excluded)/page channels >= this is "high duplicate"
+const DUP_PAGES=2;          // stop keyword after N consecutive high-duplicate pages
+const BK="ycf_blacklist_v1";
+const RL_MAP={zh:"zh-Hans"}; // API relevanceLanguage differs from our internal code
 
 const CK="ycf_cache_v3";
 const UK="ycf_usage_v1";
@@ -1477,6 +1555,10 @@ function normalizeText(s){
    SEARCH STATISTICS
 ========================================================= */
 
+function toggleStats(){
+  $("searchStats").classList.toggle("collapsed");
+}
+
 function resetSearchStats(){
 
   searchStats={
@@ -1548,6 +1630,8 @@ function updateSearchStats(){
 
   $("searchStats").classList.add("visible");
 
+  $("statsSummary").textContent=searchStats.uniqueChannels?`${searchStats.uniqueChannels} channels · ${searchStats.finalCreators} final`:"";
+
   const raw=searchStats.apiSearchResults;
   const uv=searchStats.uniqueVideos;
   const uc=searchStats.uniqueChannels;
@@ -1556,6 +1640,8 @@ function updateSearchStats(){
   $("statNote").textContent=raw
     ?`${searchStats.searchCombos} search combos completed · ${raw.toLocaleString("en-US")} API video results → ${uv.toLocaleString("en-US")} unique videos → ${uc.toLocaleString("en-US")} unique channels → ${searchStats.analysisCandidates.toLocaleString("en-US")} analysis candidates → ${searchStats.qualifiedCreators.toLocaleString("en-US")} qualified → ${final.toLocaleString("en-US")} selected.`
     :"";
+
+  if(searchStats.blacklisted)$("statNote").textContent+=` · ${searchStats.blacklisted} known channels excluded before analysis.`;
 
   renderPipeline();
 }
@@ -1569,34 +1655,23 @@ function renderPipeline(){
   if(!pipelineRows.length){
 
     body.innerHTML=
-      '<tr><td colspan="6" class="pipeline-empty">Search pipeline details will appear here.</td></tr>';
+      '<tr><td colspan="7" class="pipeline-empty">Search pipeline details will appear here.</td></tr>';
 
     return;
   }
 
   body.innerHTML=pipelineRows.map(r=>`
-
-    <tr>
-
-      <td>${escapeHTML((r.lang||"").toUpperCase())}</td>
-
-      <td class="pipeline-keyword" title="${escapeHTML(r.kw)}">
-        ${escapeHTML(r.kw)}
-      </td>
-
-      <td>${formatNumber(r.api)}</td>
-
-      <td>${formatNumber(r.videos)}</td>
-
-      <td>${formatNumber(r.channels)}</td>
-
-      <td class="pipeline-status ${r.failed?"failed":""}">
-        ${r.failed?"Failed":r.completed?"Completed":"Pending"}
-      </td>
-
-    </tr>
-
-  `).join("");
+  <tr>
+    <td>${escapeHTML((r.lang||"").toUpperCase())}</td>
+    <td class="pipeline-keyword" title="${escapeHTML(r.kw)}">${escapeHTML(r.kw)}</td>
+    <td>${formatNumber(r.api)}</td>
+    <td>${r.pages}</td>
+    <td>${r.added}</td>
+    <td>${r.dup} / ${r.excl}</td>
+    <td class="pipeline-status ${r.failed?"failed":""}">
+      ${r.failed?"Failed":r.completed?"Stopped: "+escapeHTML(r.reason):"Running…"}
+    </td>
+  </tr>`).join("");
 
 }
 
@@ -1657,10 +1732,10 @@ function saveCreatorToLibrary(c){
 
   const existing=creatorLibrary[id];
 
-  const current=
-    Array.isArray(c.foundKeywords)
-      ?c.foundKeywords
-      :[];
+  const current=[
+  ...(Array.isArray(c.searchKeywords)?c.searchKeywords:[]),
+  ...(Array.isArray(c.foundKeywords)?c.foundKeywords:[])
+];
 
   if(existing){
 
@@ -2016,102 +2091,99 @@ async function api(endpoint,params){
  * defaultLanguage is "en" or empty.
  */
 
-async function searchKw(
-  kw,
-  perKw,
-  lang,
-  pages
-){
+async function searchKw(kw,perKw,lang,onPage,poolFull,kwEnough){
+  const vids=new Set();
+  let token="",resultCount=0,pages=0,newTotal=0,lowRun=0,dupRun=0,reason="page cap";
 
-  const allChannels=new Set();
-  const allVideos=new Set();
+  for(let p=0;p<MAX_PAGES;p++){
+    if(poolFull()){reason="global pool full";break;}
 
-  let resultCount=0;
-  let token="";
-
-  for(let p=0;p<pages;p++){
-
-    const key=
-      `s3:VIDEO|${lang}|${DEFAULT_SEARCH_TYPE}|${perKw}|${kw}|${p}`;
-
+    const key=`s4:VIDEO|${lang}|${perKw}|${kw}|${p}`;
     let c=cache[key];
 
-    if(
-      !(c&&Date.now()-c.t<STTL)||
-      !Array.isArray(c.videoIds)
-    ){
-
-      const r=await api(
-        "search",
-        {
-          part:"snippet",
-          q:kw,
-          type:"video",
-          maxResults:perKw,
-          order:"relevance",
-          relevanceLanguage:lang,
-          pageToken:token
-        }
-      );
-
+    if(!(c&&Date.now()-c.t<STTL)||!Array.isArray(c.chs)){
+      const r=await api("search",{
+        part:"snippet",q:kw,type:"video",maxResults:perKw,
+        order:"relevance",relevanceLanguage:RL_MAP[lang]||lang,pageToken:token
+      });
       const items=r.items||[];
-
+      const seen=new Map();
+      items.forEach(i=>{
+        const id=i.snippet?.channelId;
+        if(id&&!seen.has(id))seen.set(id,i.snippet?.channelTitle||"");
+      });
       c=cache[key]={
-
         t:Date.now(),
-
         next:r.nextPageToken||"",
-
         resultCount:items.length,
-
-        videoIds:[
-          ...new Set(
-            items
-              .map(i=>i.id?.videoId)
-              .filter(Boolean)
-          )
-        ],
-
-        ids:[
-          ...new Set(
-            items
-              .map(i=>i.snippet?.channelId)
-              .filter(Boolean)
-          )
-        ]
-
+        videoIds:[...new Set(items.map(i=>i.id?.videoId).filter(Boolean))],
+        chs:[...seen].map(([id,title])=>({id,title}))
       };
-
     }
 
-    resultCount+=Number(
-      c.resultCount||0
-    );
+    resultCount+=Number(c.resultCount||0);
+    (c.videoIds||[]).forEach(id=>vids.add(id));
+    pages++;
 
-    (c.videoIds||[]).forEach(id=>
-      allVideos.add(id)
-    );
-
-    (c.ids||[]).forEach(id=>
-      allChannels.add(id)
-    );
-
+    const r2=onPage(c.chs);
+    newTotal+=r2.added;
+    lowRun=r2.added<LOW_YIELD_NEW?lowRun+1:0;
+    dupRun=(r2.dup+r2.excl)/Math.max(1,r2.total)>=DUP_RATE_HIGH?dupRun+1:0;
     token=c.next||"";
 
-    if(!token)break;
+    if(poolFull())reason="global pool full";
+    else if(newTotal>=kwEnough)reason="enough new channels";
+    else if(lowRun>=LOW_YIELD_PAGES)reason="low-yield pages";
+    else if(dupRun>=DUP_PAGES)reason="high duplicate rate";
+    else if(!token)reason="no more pages";
+    else continue;   // nothing triggered -> request next page
 
+    break;
   }
 
+  return{videoIds:[...vids],resultCount,pages,newTotal,reason};
+}
+
+/* ---------- Blacklist ---------- */
+
+function parseBlacklist(text){
+  const ids=new Set(),names=new Set();
+  String(text||"").split(/\r?\n/).forEach(line=>{
+    line=line.trim();
+    if(!line||line.startsWith("#"))return;
+    const m=line.match(/UC[\w-]{22}/g);
+    if(m){m.forEach(x=>ids.add(x));return;}
+    const n=normalizeText(line.replace(/^@/,""));
+    if(n)names.add(n);
+  });
   return{
-
-    ids:[...allChannels],
-
-    videoIds:[...allVideos],
-
-    resultCount
-
+    ids,names,
+    match:(id,title)=>ids.has(id)||(!!title&&names.has(normalizeText(title)))
   };
+}
 
+function onBlChange(){
+  const b=parseBlacklist($("blInput").value);
+  $("blCount").textContent=`${b.ids.size} IDs · ${b.names.size} names`;
+  const on=b.ids.size+b.names.size>0;
+  $("blBadge").textContent=on?`${b.ids.size+b.names.size} excluded`:"Optional";
+  $("blBadge").classList.toggle("on",on);
+  try{localStorage.setItem(BK,$("blInput").value);}catch(e){}
+}
+
+function initBlacklist(){
+  try{$("blInput").value=localStorage.getItem(BK)||"";}catch(e){}
+  $("blInput").addEventListener("input",onBlChange);
+  $("blFile").addEventListener("change",async e=>{
+    const f=e.target.files[0];
+    if(!f)return;
+    const t=await f.text();
+    const cur=$("blInput").value.trim();
+    $("blInput").value=(cur?cur+"\n":"")+t.trim();
+    e.target.value="";
+    onBlChange();
+  });
+  onBlChange();
 }
 
 /* =========================================================
@@ -2590,7 +2662,7 @@ function calcSimilarity(
    ESTIMATE
 ========================================================= */
 
-function estimate(){
+function estimate(pagesPer=DEFAULT_PAGES){
 
   const K=
     selectedKeywords().length;
@@ -2606,7 +2678,7 @@ function estimate(){
     );
 
   const searches=
-    K*L*DEFAULT_PAGES;
+    K*L*pagesPer;
 
   const analysis=
     Math.min(
@@ -2638,7 +2710,7 @@ function updateEst(){
   const box=$("est");
 
   box.textContent=
-    `Estimated quota: ~${e.toLocaleString()} units · Used today: ~${used.toLocaleString()} / ${DEFAULT_QUOTA_LIMIT.toLocaleString()} · Cached searches cost 0 units.`;
+  `Estimated quota: ~${e.toLocaleString()} units (smart stop, typical) · up to ${estimate(MAX_PAGES).toLocaleString()} · Used today: ~${used.toLocaleString()} / ${DEFAULT_QUOTA_LIMIT.toLocaleString()} · Cached searches cost 0 units.`;
 
   box.classList.toggle(
     "warn",
@@ -2831,163 +2903,95 @@ async function startSearch(){
      * combinations receives a stronger discovery signal.
      */
 
-    const cand=new Map();
+    const bl=parseBlacklist($("blInput").value);
+const skipLib=$("blLib").checked;
 
-    /*
-     * discoveryLangs:
-     *
-     * channelId -> Set of languages through which the
-     * creator was discovered.
-     */
+const cand=new Map();          // channelId -> number of distinct keyword/language hits
+const discoveryLangs=new Map();// channelId -> Set(lang)
+const hitKeys=new Map();       // channelId -> Set("lang|keyword")
+const kwHits=new Map();        // channelId -> Set(keyword)
+const uniqueVideoIds=new Set();
+const exclSet=new Set();
 
-    const discoveryLangs=new Map();
+const combos=selectedLanguages.length*keywords.length;
+const poolCap=target*CANDIDATE_MULTIPLIER;
+const kwEnough=clamp(Math.ceil(poolCap/combos*1.5),15,200);
+const poolFull=()=>cand.size>=poolCap;
 
-    const uniqueVideoIds=
-      new Set();
+/* Blacklist is applied here, before a channel can enter the pool or be analysed. */
+const take=(chs,kw,lang)=>{
+  let added=0,dup=0,excl=0;
+  chs.forEach(({id,title})=>{
+    if(bl.match(id,title)||(skipLib&&creatorLibrary[id])){
+      exclSet.add(id);excl++;return;
+    }
+    if(!cand.has(id)){cand.set(id,0);added++;}else dup++;
 
-    let done=0;
+    const k=lang+"|"+kw;
+    const hs=hitKeys.get(id)||hitKeys.set(id,new Set()).get(id);
+    if(!hs.has(k)){hs.add(k);cand.set(id,hs.size);}
+    (kwHits.get(id)||kwHits.set(id,new Set()).get(id)).add(kw);
+    (discoveryLangs.get(id)||discoveryLangs.set(id,new Set()).get(id)).add(lang);
+  });
+  return{added,dup,excl,total:chs.length};
+};
 
-    const total=
-      selectedLanguages.length*
-      keywords.length;
+let done=0;
 
-    /*
-     * =====================================================
-     * STEP 1
-     * SEARCH
-     * =====================================================
-     */
+outer:
+for(const kw of keywords){
+  for(const lang of selectedLanguages){
 
-    for(
-      const lang of selectedLanguages
-    ){
+    if(poolFull())break outer;
 
-      for(
-        const kw of keywords
-      ){
+    done++;
+    setProgress(
+      2+done/combos*40,
+      `Searching [${lang.toUpperCase()}] ${done}/${combos}: ${kw} · pool ${cand.size}/${poolCap}`
+    );
 
-        done++;
+    const row={lang,kw,api:0,pages:0,added:0,dup:0,excl:0,reason:"",completed:false,failed:false};
+    pipelineRows.push(row);
+    renderPipeline();
 
-        setProgress(
-          2+
-          done/total*40,
-          `Searching videos [${lang.toUpperCase()}] ${done}/${total}: ${kw}`
-        );
+    try{
+      const res=await searchKw(kw,perKw,lang,
+        chs=>{
+          const r=take(chs,kw,lang);
+          row.added+=r.added;row.dup+=r.dup;row.excl+=r.excl;
+          return r;
+        },
+        poolFull,kwEnough
+      );
 
-        const row={
-          lang,
-          kw,
-          api:0,
-          videos:0,
-          channels:0,
-          completed:false,
-          failed:false
-        };
+      row.api=res.resultCount;
+      row.pages=res.pages;
+      row.reason=res.reason;
 
-        pipelineRows.push(row);
+      searchStats.apiSearchResults+=res.resultCount;
+      res.videoIds.forEach(id=>uniqueVideoIds.add(id));
+      searchStats.uniqueVideos=uniqueVideoIds.size;
+      searchStats.uniqueChannels=cand.size;
+      searchStats.blacklisted=exclSet.size;
+      searchStats.completedCombos++;
+      row.completed=true;
 
-        renderPipeline();
-
-        try{
-
-          const result=
-            await searchKw(
-              kw,
-              perKw,
-              lang,
-              pages
-            );
-
-          row.api=
-            result.resultCount;
-
-          row.videos=
-            result.videoIds.length;
-
-          row.channels=
-            result.ids.length;
-
-          searchStats.apiSearchResults+=
-            result.resultCount;
-
-          result.videoIds.forEach(
-            id=>uniqueVideoIds.add(id)
-          );
-
-          result.ids.forEach(id=>{
-
-            cand.set(
-              id,
-              (cand.get(id)||0)+1
-            );
-
-            if(!discoveryLangs.has(id)){
-
-              discoveryLangs.set(
-                id,
-                new Set()
-              );
-
-            }
-
-            discoveryLangs
-              .get(id)
-              .add(lang);
-
-          });
-
-          searchStats.uniqueVideos=
-            uniqueVideoIds.size;
-
-          searchStats.uniqueChannels=
-            cand.size;
-
-          searchStats.completedCombos++;
-
-          row.completed=true;
-
-        }catch(e){
-
-          row.failed=true;
-
-          searchStats.failedCombos++;
-
-          if(e instanceof QuotaError){
-
-            quotaHit=true;
-
-            renderPipeline();
-
-            break;
-
-          }
-
-          console.warn(
-            "video search failed:",
-            kw,
-            lang,
-            e
-          );
-
-        }
-
-        updateSearchStats();
-
-        await sleep(60);
-
-      }
-
-      if(quotaHit)break;
-
+    }catch(e){
+      row.failed=true;
+      searchStats.failedCombos++;
+      if(e instanceof QuotaError){quotaHit=true;renderPipeline();break outer;}
+      console.warn("video search failed:",kw,lang,e);
     }
 
-    saveCache();
+    updateSearchStats();
+    await sleep(60);
+  }
+}
 
-    searchStats.uniqueVideos=
-      uniqueVideoIds.size;
-
-    searchStats.uniqueChannels=
-      cand.size;
+saveCache();
+searchStats.uniqueVideos=uniqueVideoIds.size;
+searchStats.uniqueChannels=cand.size;
+searchStats.blacklisted=exclSet.size;
 
     /*
      * =====================================================
@@ -3363,7 +3367,8 @@ async function startSearch(){
 
         foundKeywords,
 
-        discoveryHits
+        discoveryHits,
+searchKeywords:[...(kwHits.get(info.id)||[])]
 
       });
 
@@ -4004,6 +4009,13 @@ ${
 </div>
 
 <div class="detail-item full">
+  <div class="detail-label">Discovered By Keywords (${(c.searchKeywords||[]).length})</div>
+  <div class="keyword-list">
+    ${(c.searchKeywords||[]).map(k=>`<span class="keyword-tag">${escapeHTML(k)}</span>`).join("")||"—"}
+  </div>
+</div>
+
+<div class="detail-item full">
 
 <div class="detail-label">
 Matched Keywords — This Search
@@ -4209,6 +4221,7 @@ function exportCSV(){
     "Last Published",
     "Description",
     "Found Keywords",
+    "Search Hit Keywords",
     "Historical Discovery Keywords"
 
   ];
@@ -4283,6 +4296,8 @@ function exportCSV(){
 
         (c.foundKeywords||[])
           .join(" | "),
+
+        (c.searchKeywords||[]).join(" | "),
 
         (c.historicalKeywords||[])
           .join(" | ")
@@ -4418,11 +4433,77 @@ function exportLibraryCSV(){
    INIT
 ========================================================= */
 
+initBlacklist();
+
 updateLibraryUI();
 
 updateSearchStats();
 
 updateEst();
+
+
+/* =========================================================
+   MOUSE PARTICLES
+========================================================= */
+(function(){
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+
+  const cv=document.createElement("canvas");
+  cv.style.cssText="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999";
+  document.body.appendChild(cv);
+
+  const ctx=cv.getContext("2d");
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  let W=0,H=0;
+
+  const resize=()=>{
+    W=innerWidth;H=innerHeight;
+    cv.width=W*dpr;cv.height=H*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  };
+  resize();
+  addEventListener("resize",resize);
+
+  const COLORS=["139,92,246","236,72,153","79,140,255","32,199,201"];
+  let ps=[],px=-1,py=-1,run=false;
+
+  addEventListener("pointermove",e=>{
+    const mx=e.clientX,my=e.clientY;
+    if(px<0){px=mx;py=my;}
+
+    const n=Math.min(4,Math.ceil(Math.hypot(mx-px,my-py)/14));
+    for(let i=0;i<n;i++){
+      const t=i/n;
+      ps.push({
+        x:px+(mx-px)*t,y:py+(my-py)*t,
+        vx:(Math.random()-.5)*.8,
+        vy:(Math.random()-.5)*.8-.15,
+        r:Math.random()*2.2+1,
+        life:1,
+        c:COLORS[Math.random()*COLORS.length|0]
+      });
+    }
+    px=mx;py=my;
+
+    if(ps.length>140)ps.splice(0,ps.length-140);
+    if(!run){run=true;requestAnimationFrame(tick);}
+  },{passive:true});
+
+  document.addEventListener("pointerleave",()=>{px=-1;});
+
+  function tick(){
+    ctx.clearRect(0,0,W,H);
+    ps=ps.filter(p=>p.life>0);
+    ps.forEach(p=>{
+      p.x+=p.vx;p.y+=p.vy;p.life-=.02;
+      ctx.beginPath();
+      ctx.fillStyle=`rgba(${p.c},${(p.life*.55).toFixed(3)})`;
+      ctx.arc(p.x,p.y,p.r*p.life+.4,0,Math.PI*2);
+      ctx.fill();
+    });
+    if(ps.length)requestAnimationFrame(tick);else run=false;
+  }
+})();
 
 </script>
 
