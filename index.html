@@ -421,7 +421,7 @@ placeholder="One per line — channel name or Channel ID (UC…)&#10;Mixed input
 <div class="bl-foot">
 <span class="hint" id="blCount">0 IDs · 0 names</span>
 <div class="bl-actions">
-<label class="bl-lib"><input type="checkbox" id="blLib"> Also skip creators in local library</label>
+<label class="bl-lib"><input type="checkbox" id="blLib" checked> Skip creators already in local library</label>
 <button type="button" class="btn-secondary" onclick="$('blFile').click()">Import TXT / CSV</button>
 <button type="button" class="btn-secondary" onclick="$('blInput').value='';onBlChange()">Clear</button>
 <input type="file" id="blFile" accept=".txt,.csv" hidden>
@@ -1132,8 +1132,14 @@ async function loadChannels(ids){
   }
 }
 
-async function loadVideos(e){
+async function loadVideos(e,maxDays=0){
+
   if(e.vids&&Date.now()-e.vt<TTL)return e.vids;
+
+  /* Latest upload date (any type) older than the activity window: the latest long-form video is older too. */
+  const tooOld=iso=>maxDays>0&&iso!=null&&(!iso||Date.now()-new Date(iso)>maxDays*864e5);
+
+  if(e.pt&&Date.now()-e.pt<TTL&&tooOld(e.latestUp))return null;
 
   if(!e.info.uploads){
     e.vids=[];
@@ -1147,7 +1153,16 @@ async function loadVideos(e){
     maxResults:50
   });
 
-  const ids=(pl.items||[]).map(x=>x.contentDetails?.videoId).filter(Boolean);
+  const items=pl.items||[];
+  const dates=items.map(x=>x.contentDetails?.videoPublishedAt||"").filter(Boolean).sort();
+
+  /* "" = empty channel, null = dates unavailable (never skip on unknown data) */
+  e.latestUp=dates.length?dates[dates.length-1]:(items.length?null:"");
+  e.pt=Date.now();
+
+  if(tooOld(e.latestUp))return null;
+
+  const ids=items.map(x=>x.contentDetails?.videoId).filter(Boolean);
   let vids=[];
 
   if(ids.length){
@@ -1216,19 +1231,46 @@ const langCheck=languageSignal;
    RELEVANCE
 ========================================================= */
 
+const STOPWORDS=new Set(["mit","und","der","die","das","fur","von","zu","de","la","le","les","des","du","el","los","las","en","con","para","por","y","et","pour","avec","um","uma","com","to","the","for","with","of","and","a","in","on"]);
+
+/* Keyword words without filler words ("mit", "de", "for"...) */
+function kwTokens(k){
+  const all=normalizeText(k).split(" ").filter(Boolean);
+  const core=all.filter(t=>!STOPWORDS.has(t));
+  return core.length?core:all;
+}
+
+function makeIndex(text){
+  const n=normalizeText(text);
+  return{n,words:new Set(n.split(" ").filter(Boolean)),c:n.replace(/ /g,"")};
+}
+
+/* Short words (KI, AI, IA) must match a whole word; longer ones may sit inside compounds (Videogenerator). */
+function tokenHit(ix,t){
+  return t.length<=3?ix.words.has(t):ix.c.includes(t);
+}
+
+/* A keyword matches when the exact phrase appears, or when every one of its words appears in any order. */
+function kwMatch(ix,k){
+  const phrase=normalizeText(k);
+  if(!phrase)return false;
+  if(ix.n.includes(phrase))return true;
+  const tk=kwTokens(k);
+  return tk.length>0&&tk.every(t=>tokenHit(ix,t));
+}
+
 function calcSimilarity(keywords,chDesc,vids){
   if(!keywords.length)return 0;
 
-  const cd=normalizeText(chDesc);
-  const titles=vids.map(v=>normalizeText(v.title));
-  const descs=vids.map(v=>normalizeText(v.desc));
+  const cd=makeIndex(chDesc);
+  const titles=vids.map(v=>makeIndex(v.title));
+  const descs=vids.map(v=>makeIndex(v.desc));
 
   const scores=keywords.map(k=>{
-    const kw=normalizeText(k);
-    if(!kw)return 0;
-    const t=Math.min(1,titles.filter(x=>x.includes(kw)).length/3);
-    const d=Math.min(1,descs.filter(x=>x.includes(kw)).length/3);
-    return .6*t+.25*d+(cd.includes(kw)?.15:0);
+    if(!normalizeText(k))return 0;
+    const t=Math.min(1,titles.filter(x=>kwMatch(x,k)).length/3);
+    const d=Math.min(1,descs.filter(x=>kwMatch(x,k)).length/3);
+    return .6*t+.25*d+(kwMatch(cd,k)?.15:0);
   }).sort((a,b)=>b-a);
 
   const n=Math.min(5,keywords.length);
@@ -1479,7 +1521,8 @@ async function startSearch(){
       /* Subscriber filter first: it saves playlistItems/videos requests. */
       if(info.subs<minSubs||info.subs>maxSubs)return;
 
-      const vids=await loadVideos(e);
+      const vids=await loadVideos(e,days);
+      if(!vids)return;
 
       let vs=noShorts?vids.filter(v=>v.dur>180):vids;
       vs=vs.slice(0,20);
@@ -1507,8 +1550,8 @@ async function startSearch(){
 
       const similarity=calcSimilarity(kwList,info.desc,vs);
 
-      const searchText=normalizeText(info.desc+" "+vs.map(v=>v.title).join(" "));
-      const foundKeywords=kwList.filter(k=>searchText.includes(normalizeText(k)));
+      const searchIx=makeIndex(info.desc+" "+vs.map(v=>v.title).join(" "));
+      const foundKeywords=kwList.filter(k=>kwMatch(searchIx,k));
 
       const discoveryHits=cand.get(info.id)||1;
       const languageScore=Number(L.score||0);
