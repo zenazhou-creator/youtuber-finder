@@ -352,7 +352,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <label class="language-option"><input type="checkbox" value="ko"><span>Korean</span></label>
 </div>
 <div class="hint">
-Language is used to find creators, not as a strict filter.
+Language is detected from each channel's text (description and recent titles), not only from YouTube metadata. "Language Filter" below sets how strict that is.
 </div>
 </div>
 
@@ -384,6 +384,15 @@ Up to 5 per language. Press Enter to add, click × to remove.
 <label><input type="checkbox" id="noShorts" checked> Exclude Shorts</label>
 </div>
 <div class="hint">Stats are based on long-form videos.</div>
+</div>
+<div class="field">
+<label for="langStrict">Language Filter</label>
+<select id="langStrict">
+<option value="loose">Loose — drop only clear mismatches</option>
+<option value="standard" selected>Standard — drop clearly non-target text</option>
+<option value="strict">Strict — only confirmed target language</option>
+</select>
+<div class="hint">Judged from each channel's description and recent video titles. Too many real creators dropped (e.g. their descriptions are mostly English)? Switch to Loose.</div>
 </div>
 
 <div class="field full depth-box">
@@ -600,7 +609,7 @@ const freshStats=()=>({
   apiSearchResults:0,uniqueVideos:0,uniqueChannels:0,analysisCandidates:0,
   passedSubscribers:0,passedActivity:0,passedLanguage:0,
   qualifiedCreators:0,finalCreators:0,
-  libraryNew:0,libraryUpdated:0,libraryTotal:0,blacklisted:0
+  libraryNew:0,libraryUpdated:0,libraryTotal:0,blacklisted:0,languageDropped:0
 });
 
 let searchStats=freshStats();
@@ -798,6 +807,7 @@ function updateSearchStats(){
   $("statNote").textContent=s.apiSearchResults
     ?`${s.searchCombos} search combos · ${L(s.apiSearchResults)} API video results → ${L(s.uniqueVideos)} unique videos → ${L(s.uniqueChannels)} unique channels → ${L(s.analysisCandidates)} analysis candidates → ${L(s.qualifiedCreators)} qualified → ${L(s.finalCreators)} shown.`
     :"";
+  if(s.languageDropped)$("statNote").textContent+=` ${s.languageDropped} dropped by the language filter.`;
   if(s.blacklisted)$("statNote").textContent+=` ${s.blacklisted} known channels excluded before analysis.`;
 
   renderPipeline();
@@ -1187,45 +1197,97 @@ async function loadVideos(e,maxDays=0){
 }
 
 /* =========================================================
-   LANGUAGE SIGNAL
-   Signals: channel defaultLanguage, recent video language,
-   and the language a channel was discovered in. Only a
-   channel that is explicitly non-target on every signal is
-   dropped; unknown and ambiguous channels are kept.
+   LANGUAGE DETECTION + FILTER      (replaces the old "LANGUAGE SIGNAL" block)
+
+   Why: the old filter let every channel through, because the "discovery language"
+   is always the language you searched in. This version looks at the actual text.
+
+   Signals, most trusted first:
+   1. TEXT  – share of common function words in the channel description + recent
+              video titles/descriptions (Latin languages), or share of script
+              characters (Chinese / Japanese / Korean). Costs no API quota.
+   2. META  – channel defaultLanguage / video default(Audio)Language. Often empty
+              or wrong, so it supports the text signal but never overrules it.
+   The language a channel was FOUND in is no longer a signal.
+
+   Strictness (select #langStrict):
+   loose    – drop only when the text is clearly another language AND metadata does not say target
+   standard – drop clearly non-target text; also drop "unclear text + metadata says other"
+   strict   – keep only channels whose text is confirmed as a target language
+
+   To support another Latin-script language: add one row to STOP (accent-free words).
+   To tune: change MIN_TEXT_LETTERS / MIN_SHARE.
 ========================================================= */
+
+const MIN_TEXT_LETTERS=40;   // less text than this -> "unclear"
+const MIN_SHARE=0.08;        // best language needs at least this share of function words / script characters
+
+/* Accent-free function words (text goes through normalizeText first). Prefer words that are
+   frequent in one language and rare in the others. */
+const STOP={
+  en:"the and is are with you your this that how of to it we my from what can will not be have about they was but or our if just all best new for".split(" "),
+  de:"der die das und ist nicht mit fur von zu den dem ein eine auf ich wir sie auch bei wie wird sind noch oder nach aus uber mehr im".split(" "),
+  es:"el los las que por con para del como mas pero muy esta este una es se su sus ya hay todo sin sobre entre".split(" "),
+  fr:"le les des du une est pas pour qui dans sur avec ce cette vous nous je au aux plus sont mais comment tout et ete etre".split(" "),
+  pt:"os as do da dos das em uma para com nao por mais se como mas ao voce ser tem foi sao muito isso esse".split(" ")
+};
+const STOPSET=Object.fromEntries(Object.entries(STOP).map(([l,w])=>[l,new Set(w)]));
+
+/* Script-based languages */
+const SCRIPTS={
+  zh:/\p{Script=Han}/gu,
+  ja:/[\p{Script=Hiragana}\p{Script=Katakana}]/gu,
+  ko:/\p{Script=Hangul}/gu
+};
 
 const normalizeLang=l=>String(l||"").toLowerCase().trim().slice(0,2);
 
-function languageSignal(info,vids,selected,discoveryLangs=[]){
-  if(!selected.length)return{ok:true,known:true,level:"none",score:0,source:"none"};
+/* Text used for detection: description + titles + short video descriptions */
+const languageSample=(info,vids)=>[info.desc,...(vids||[]).map(v=>v.title+" "+v.desc)].join(" ");
+
+/* -> {lang:"de", share:0.31, scores:{...}}   lang is "" when there is too little text or no clear winner */
+function detectLanguage(raw){
+  const text=String(raw||"").replace(/https?:\/\/\S+|[#@]\S+/g," ");
+  const letters=(text.match(/\p{L}/gu)||[]).length;
+  if(letters<MIN_TEXT_LETTERS)return{lang:"",share:0,scores:{}};
+
+  const scores={};
+  for(const l in SCRIPTS)scores[l]=(text.match(SCRIPTS[l])||[]).length/letters;
+  if(scores.ja>=0.05)scores.zh=0;                    // Japanese text also contains Han characters
+
+  const words=normalizeText(text).split(" ").filter(Boolean);
+  for(const l in STOPSET)scores[l]=words.length?words.filter(w=>STOPSET[l].has(w)).length/words.length:0;
+
+  const [lang,share]=Object.entries(scores).sort((a,b)=>b[1]-a[1])[0];
+  return{lang:share>=MIN_SHARE?lang:"",share,scores};
+}
+
+/* -> {ok, known, level, score, source, detected, share}
+   level: strong (text+meta target) | text | meta | unknown | foreign | mixed */
+function languageSignal(info,vids,selected,text,strictness="standard"){
+  if(!selected.length)return{ok:true,known:true,level:"none",score:0,source:"none",detected:"",share:0};
+
+  const det=detectLanguage(text);
+  const verdict=!det.lang?"unclear":selected.includes(det.lang)?"target":"foreign";
 
   const ch=normalizeLang(info.lang);
   const vl=(vids||[]).slice(0,10).map(v=>normalizeLang(v.lang)).filter(Boolean);
-  const disc=[...new Set((discoveryLangs||[]).map(normalizeLang).filter(Boolean))];
+  const metaTarget=selected.includes(ch)||vl.some(l=>selected.includes(l));
+  const metaForeign=!metaTarget&&!!ch&&vl.length>0;   // channel language set AND videos have a language, none is a target
 
-  if(ch&&selected.includes(ch))
-    return{ok:true,known:true,level:"strong",score:100,source:"channel"};
+  let level,score,source;
+  if(verdict==="target"){level=metaTarget?"strong":"text";score=metaTarget?100:90;source=metaTarget?"text+meta":"text";}
+  else if(verdict==="foreign"){level=metaTarget?"mixed":"foreign";score=metaTarget?35:0;source="text";}
+  else if(metaTarget){level="meta";score=80;source="meta";}
+  else if(metaForeign){level="foreign";score=0;source="meta";}
+  else{level="unknown";score=50;source="none";}
 
-  const tv=vl.filter(l=>selected.includes(l)).length;
-  if(tv>0)
-    return{ok:true,known:true,level:"strong",score:90,source:"video"};
+  const ok=strictness==="strict"?verdict==="target"
+    :strictness==="loose"?!(verdict==="foreign"&&!metaTarget)
+    :verdict!=="foreign"&&!(verdict==="unclear"&&metaForeign);
 
-  if(disc.some(l=>selected.includes(l))){
-    if(ch&&!selected.includes(ch))
-      return{ok:true,known:true,level:"search",score:78,source:"search"};
-    return{ok:true,known:false,level:"search",score:82,source:"search"};
-  }
-
-  if(!ch&&!vl.length)
-    return{ok:true,known:false,level:"unknown",score:50,source:"unknown"};
-
-  if(ch&&!selected.includes(ch)&&vl.length>0&&tv===0)
-    return{ok:false,known:true,level:"other",score:0,source:"other"};
-
-  return{ok:true,known:false,level:"mixed",score:45,source:"mixed"};
+  return{ok,known:level!=="unknown",level,score,source,detected:det.lang,share:det.share};
 }
-
-const langCheck=languageSignal;
 
 /* =========================================================
    RELEVANCE
@@ -1380,6 +1442,7 @@ async function startSearch(){
     const perKw=DEFAULT_PER_KEYWORD;
     const days=num("activeDays",0);
     const noShorts=$("noShorts").checked;
+    const langStrict=$("langStrict").value;
 
     const bl=parseBlacklist($("blInput").value);
     const skipLib=$("blLib").checked;
@@ -1536,8 +1599,8 @@ async function startSearch(){
 
       const dLangs=[...(discoveryLangs.get(info.id)||[])];
 
-      const L=langCheck(info,vs,languages,dLangs);
-      if(!L.ok)return;
+      const L=languageSignal(info,vs,languages,languageSample(info,vs),langStrict);
+      if(!L.ok){searchStats.languageDropped++;updateSearchStats();return;}
 
       searchStats.passedLanguage++;
       updateSearchStats();
@@ -1572,6 +1635,7 @@ async function startSearch(){
         country:info.country,
         channelLang:info.lang,
         langKnown:L.known,
+        detectedLang:L.detected,detectedShare:Math.round((L.share||0)*100),
         languageLevel:L.level,
         languageSource:L.source,
         languageScore,
@@ -1699,10 +1763,9 @@ function statusBadge(c){
   return'<span class="result-status status-saved">SAVED</span>';
 }
 
+const LANG_LEVELS={strong:["Strong","signal-strong"],text:["Text","signal-search"],meta:["Meta","signal-search"],mixed:["Mixed","signal-mixed"],foreign:["Foreign","signal-mixed"],search:["Search","signal-search"],other:["Other","signal-mixed"],unknown:["Unknown","signal-unknown"]};
 function languageBadge(c){
-  const level=c.languageLevel||"unknown";
-  const label={strong:"Strong",search:"Search",mixed:"Mixed",other:"Other"}[level]||"Unknown";
-  const cls={strong:"signal-strong",search:"signal-search",mixed:"signal-mixed"}[level]||"signal-unknown";
+  const [label,cls]=LANG_LEVELS[c.languageLevel]||LANG_LEVELS.unknown;
   return`<span class="language-signal ${cls}" title="${escapeHTML(c.languageSource||"")}">${label}</span>`;
 }
 
@@ -1780,6 +1843,7 @@ function renderResults(){
 <div class="detail-inner">
 ${item("Channel Language",c.channelLang?escapeHTML(c.channelLang):"Unknown")}
 ${item("Language Signal",languageBadge(c))}
+${item("Detected Text Language",c.detectedLang?`${escapeHTML(c.detectedLang.toUpperCase())} · ${c.detectedShare||0}%`:"Not enough text")}
 ${item("Discovery Languages",escapeHTML(discoveryLangs))}
 ${item("Language Score",`${c.languageScore||0}/100`)}
 ${item("Valid Videos",`${c.validVideoCount}/20`)}
@@ -1850,7 +1914,7 @@ function exportCSV(){
   const headers=[
     "Rank","Channel Name","Channel ID","Channel URL","Library Status","First Found","Last Seen","Times Found",
     "Contact","Subscribers","Median Views (20)","Avg Views (20)","Valid Videos","Total Videos","Country",
-    "Channel Language","Language Signal","Language Source","Discovery Languages","Language Score",
+    "Channel Language","Language Signal","Language Source","Detected Text Language","Discovery Languages","Language Score",
     "Keyword Relevance %","Ranking Score","Last Published","Description",
     "Found Keywords","Search Hit Keywords","Historical Discovery Keywords"
   ];
@@ -1858,7 +1922,7 @@ function exportCSV(){
   const rows=sortedCreators().map((c,i)=>[
     i+1,c.name,c.channelId,c.url,c.libraryStatus||"",isoOrEmpty(c.firstFound),isoOrEmpty(c.lastSeen),c.timesFound||0,
     c.contact,c.subscribers,c.medianViews,c.avgViews,c.validVideoCount,c.totalVideos,c.country,
-    c.channelLang,c.languageLevel||"",c.languageSource||"",joinBar(c.discoveryLanguages),c.languageScore||0,
+    c.channelLang,c.languageLevel||"",c.languageSource||"",c.detectedLang||"",joinBar(c.discoveryLanguages),c.languageScore||0,
     c.similarity,Math.round(c.rankingScore||0),dayOrEmpty(c.lastPub),c.description,
     joinBar(c.foundKeywords),joinBar(c.searchKeywords),joinBar(c.historicalKeywords)
   ]);
